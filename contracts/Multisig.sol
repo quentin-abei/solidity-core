@@ -15,6 +15,7 @@ contract MultiSig {
         address recipient;
         uint value;
         bool executed;
+        bytes data;
     }
 
     mapping(uint => Transaction) public transactions;
@@ -34,13 +35,28 @@ contract MultiSig {
         required = _required;
     }
 
-    function addTransaction(address destination, uint value)
-       public
+    receive() external payable {}
+
+    function addTransaction(address destination, uint value, bytes calldata _data)
+       internal
        returns(uint transactionId) {
         transactionId = transactionCount;
-        transactions[transactionCount] = Transaction(destination, value, false);
+        transactions[transactionCount] = Transaction(destination, value, false, _data);
         transactionCount += 1;
     } 
+
+    function isConfirmed(uint transactionId) public view returns (bool) {
+         return getConfirmationsCount(transactionId) >= required;          
+
+    }
+
+    function executeTransaction(uint transactionId) public {
+        require(isConfirmed(transactionId));
+        Transaction storage _tx = transactions[transactionId];
+        (bool success,bytes memory _data ) = _tx.recipient.call{ value: _tx.value }(_tx.data);
+        require(success);
+        _tx.executed = true;
+    }
 
     function isOwner(address addr) private view returns(bool) {
         for(uint i = 0; i < owners.length; i++) {
@@ -53,8 +69,16 @@ contract MultiSig {
 
     function confirmTransaction(uint transactionId) public{
        require(isOwner(msg.sender));
-        confirmations[transactionId][msg.sender] = true;          
+       confirmations[transactionId][msg.sender] = true; 
+       if(isConfirmed(transactionId)){
+           executeTransaction(transactionId);
+       }         
        
+    }
+
+    function submitTransaction(address dest, uint value, bytes calldata _data) external {
+        uint id = addTransaction(dest, value, _data);
+        confirmTransaction(id);
     }
 
     function getConfirmationsCount(uint transactionId) 
